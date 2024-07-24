@@ -1,0 +1,140 @@
+%%
+pos = 5;
+w=2;
+%   The input setpoint is in Volts and can vary from 0 to 10 Volts because the position pot is refered to GND
+
+V_7805=5.48;
+Vref_arduino=4.90607;
+
+legacy = false;
+tic
+ 
+t=0;
+timeData=[];
+
+if ~exist('a','var')
+    % clear
+    % delete(instrfind({'Port'},{'COM7'}));    
+    if legacy
+        a=arduino('COM3'); % 'COM3' needs to be set manually into the correct port of Arduino
+    else
+        a = arduino;
+    end
+end
+
+% OUTPUT ZERO CONTROL SIGNAL TO STOP MOTOR  %
+if legacy
+    analogWrite(a,6,0);
+    analogWrite(a,9,0);
+else
+    writePWMVoltage(a, 'D6', 0)
+    writePWMVoltage(a, 'D9', 0)
+end
+
+positionData = [];
+velocityData = [];
+uData = [];
+timeData = [];
+
+t=0;
+
+% CLOSE ALL PREVIOUS FIGURES 
+close all
+
+% WAIT A KEY TO PROCEED
+disp(['Connect cable from Arduino to Input Power Amplifier and then press enter to start controller']);
+pause()
+
+des_pos=[];
+
+%START CLOCK
+%% επιλεγω θετικα κερδη
+km = 155.39;
+Tm = 0.568;
+ke = 1/36;
+ko = 0.24667;
+kt = 9.2667*0.0001;
+k1 = 1;
+k2 = (2*Tm*sqrt(((km*kt)/(Tm))*(-k1)*((-ke*ko)/kt))-1)/(km*kt);
+C=[1 0];
+B=[0;km*kt/Tm];
+A=[0,-ke*ko/kt;0,-1/Tm];
+k=[k1,k2];
+kr=-1/(C*(A-B*k)^(-1)*B);
+tic
+
+
+while(t<5)  
+    
+if legacy
+    velocity = analogRead(a,3);
+    position = analogRead(a,5);
+    theta = 3 * Vref_arduino * position / 1023;
+    vtacho = 2 * (2 * velocity * Vref_arduino / 1023 - V_7805);
+else
+    position = readVoltage(a, 'A5'); % position
+    velocity = readVoltage(a,'A3'); % velocity
+    theta = 3 * Vref_arduino * position / 5;
+    vtacho = 2 * (2 * velocity * Vref_arduino / 5 - V_7805);
+end
+
+
+ u = -k1*theta-k2*vtacho+kr*(5+2*sin(w*t));
+
+
+if u > 0
+    if legacy
+        analogWrite(a,6,0);
+        analogWrite(a,9, min(round(u/2 * 255/ Vref_arduino) , 255)); %min is used to saturate
+    else        
+        writePWMVoltage(a, 'D6', 0);
+        writePWMVoltage(a, 'D9', min(abs(u) / 2, 5));
+    end
+else
+     if legacy
+        analogWrite(a,9,0);
+        analogWrite(a,6, min(round(-u/2 * 255/ Vref_arduino) , 255)); %min is used to saturate
+    else        
+        writePWMVoltage(a, 'D9', 0);
+        writePWMVoltage(a, 'D6', min(abs(u) / 2, 5));
+     end
+end
+
+
+t=toc/2;
+
+    
+timeData = [timeData t];
+positionData = [positionData theta];
+velocityData = [velocityData vtacho];
+uData = [uData u];
+
+end
+
+% OUTPUT ZERO CONTROL SIGNAL TO STOP MOTOR  %
+if legacy
+    analogWrite(a,6,0);
+    analogWrite(a,9,0);
+else
+    writePWMVoltage(a, 'D6', 0)
+    writePWMVoltage(a, 'D9', 0)
+end
+
+
+disp(['End of control Loop. Press enter to see diagramms']);
+pause();
+
+%%
+figure
+plot(timeData,positionData,timeData,5+2*sin(w*timeData),timeData,velocityData);
+grid on;
+legend('x1 θεση','επιθυμητη θεση','x2 ταχυτητα');
+figure
+plot(timeData,uData);
+title('uin');
+grid on;
+
+%%
+disp('Disonnect cable from Arduino to Input Power Amplifier and then press enter to stop controller');
+pause();
+
